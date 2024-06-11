@@ -1,0 +1,72 @@
+BODY.main
+{
+  font-family: arial;
+  font-size: 11pt;
+  top: 0px;
+  border: 0px;
+  margin: 0px 0px 0px 0px;
+  height: 100%;
+  width: 100%;
+  padding: 0px;
+  background-color: #FFFFFF;
+  background-image: url(../images/achtergrond1.gif);
+  background-repeat: repeat-x;
+}
+
+BODY.picture
+{
+  font-family: arial;
+  font-size: 11pt;
+  top: 0px;
+  border: 0px;
+  margin: 0px 0px 0px 0px;
+  height: 100%;
+  width: 100%;
+  padding: 0px;
+  background-color: #FFFFFF;
+}
+
+
+TABLE.main
+{
+  border: none;
+  font-size: 10pt;
+}
+
+TABLE
+{
+  border: none;
+  border-collapse: separate;
+  border-spacing: 1px;
+  font-size: 10pt;
+}
+
+THEAD
+{
+  align: center;
+  font-size: 12pt;
+}
+
+TD.menu
+{
+  color: white;
+  font-weight: bold;
+}
+
+A:link 
+{
+  color: blue;
+}
+A:visited
+{
+  color: blue;
+}
+
+A.helplink:link { color: white }
+A.helplink:visited { color: white }
+
+.handcursor
+{
+  cursor: hand;
+  cursor: pointer;
+}
