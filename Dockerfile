@@ -49,9 +49,13 @@ RUN chmod +x ./*.sh
 # compile msalign2
 RUN gcc -o msalign2 base64.c ramp.c msalign2.c -I. -lgd -lm -lz -std=gnu99
 
-# some folders
+# add some folders
 RUN mkdir -p /var/www/html/data
 RUN mkdir -p /var/www/html/temp
+
+# make writable for the webserver
+RUN chmod a+rwx /var/www/html/data
+RUN chmod a+rwx /var/www/html/temp
 
 EXPOSE 80
 
