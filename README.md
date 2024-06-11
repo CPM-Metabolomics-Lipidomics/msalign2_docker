@@ -1,40 +1,14 @@
-# CPM_shiny
+# MSalign2
 
-My shiny server in docker.
-
-# Build
-
-Build the container with e.g.:
-
-```
-docker build --tag ricolumc/cpm_shiny:cpm_v0.6 . 
-```
-
-# Docker hub
-
-To push everything to the docker hub repository, first login:
-
-```
-docker login -u <username>
-```
-
-Push it:
-
-```
-docker push ricolumc/cpm_shiny:cpm_v0.6
-```
-
-And logout:
-
-```
-docker logout
-```
+This docker container runs the msalign2 web service.
 
 # Run 
 
-Run the build container with;
+Run the build container with. You need a folder for:
+
+* data
+* temporary files
 
 ```
-docker run -d -p 3838:3838 -v /your/folder/with/apps:/srv/shiny-server -v /your/folder/for/logging:/var/log/shiny-server ricolumc/cpm_shiny:cpm_v0.6
+docker run -d -p 80:80 -v /your/folder/with/data:/var/www/html/data -v /your/folder/for/temp:/var/www/html/temp ricolumc/msalign2:latest
 ```
-
