@@ -105,7 +105,7 @@ int getMsSpect(spectStrct *msSpect, RAMPFILE *pFI, int scanNum[2])
 	  
 	  spects[spectNum].size = 0;
 	  n = 0;
-	  while (pPeaks[n] != -1)
+	  while (pPeaks && (pPeaks[n] != -1))
 	    {
 	      spects[spectNum].xval[spects[spectNum].size] = pPeaks[n];
 	      n++;
@@ -177,7 +177,7 @@ int getCidSpect(double *mz, double *et, spectStrct *cidSpect, RAMPFILE *pFI, int
 	  
 	  spects[spectNum].size = 0;
 	  n = 0;
-	  while (pPeaks[n] != -1)
+	  while (pPeaks && (pPeaks[n] != -1))
 	    {
 	      spects[spectNum].xval[spects[spectNum].size] = pPeaks[n];
 	      n++;
@@ -329,7 +329,7 @@ int main(int argc, char *argv[])
   FILE *inp, *outp;
 
   typedef struct {
-    double B[MAX_BREAKPOINTS][2];
+    double B[MAX_BREAKPOINTS+1][3]; /* x in [1], y in [2]; B[MAX_BREAKPOINTS] is the end point (Xmax,Ymax) */
     int nB;
   } PLF_type; /* piecewise linear function */
  
@@ -342,14 +342,14 @@ int main(int argc, char *argv[])
   struct RunHeaderStruct run_header;
   int nographics, SetFeatures, CountFeatures, assumed_charge, n_masses, n_unique_masses, n_unique_masses1, n_unique_masses2, range[2], seen_before, LC_sigma_set, Xmax_set, Ymax_set, non_matched;
   long i, j, k, n;
-  double max_mass_measurement_error, MS_start_rt, MS_end_rt, end1, end2, last_x, last_y, *SIC_1_argmax, *SIC_2_argmax, *SIC_2a_argmax, start_scan, end_scan, intensity_sum, *SIC_1_max, *SIC_2_max, *SIC_2a_max, A[MAX_DATAPOINTS][2], scan_diff[MAX_DATAPOINTS], scan_diff_median, intensity_max, scan_intensity_max, *SIC_1_max_mz, *SIC_2_max_mz, *SIC_2a_max_mz, error[MAX_DATAPOINTS], swap, sum_squared_deviation, LC_sigma, Xmax, Xmax_temp, Ymax, background, oldbackground1, background1, background2, oldbackground2, costs, argFitness;
+  double max_mass_measurement_error, MS_start_rt, MS_end_rt, end1, end2, last_x, last_y, *SIC_1_argmax, *SIC_2_argmax, *SIC_2a_argmax, start_scan, end_scan, intensity_sum, *SIC_1_max, *SIC_2_max, *SIC_2a_max, A[MAX_DATAPOINTS][3], scan_diff[MAX_DATAPOINTS], scan_diff_median, intensity_max, scan_intensity_max, *SIC_1_max_mz, *SIC_2_max_mz, *SIC_2a_max_mz, error[MAX_DATAPOINTS], swap, sum_squared_deviation, LC_sigma, Xmax, Xmax_temp, Ymax, background, oldbackground1, background1, background2, oldbackground2, costs, argFitness;
   int go, r, SumFeatures, SetBackground, feature_index, CountAttempts; 
   
   double mimass[5]={1.0078250321,12,14.0030740052,15.9949146221,31.97207069};
   int fragment[5]; 
 
  
-  double fitness(double A[MAX_DATAPOINTS][2], int nA, PLF_type S)
+  double fitness(double A[MAX_DATAPOINTS][3], int nA, PLF_type S)
   {
     double f=0,k,m;
     int i,j,bp1,bp2;
@@ -358,7 +358,7 @@ int main(int argc, char *argv[])
     for(i=0;i<nA;i++)
       {
 	j=0;
-	while(S.B[j][1]<0) j=j+1;
+	while((j<MAX_BREAKPOINTS-2)&&(S.B[j][1]<0)) j=j+1;
 	bp1=j; bp2=j+1;
 	for(j=0;j<MAX_BREAKPOINTS-1;j++)
 	  {
@@ -416,7 +416,7 @@ int main(int argc, char *argv[])
     return S;
   } 
 
-   PLF_type GAalign(double A[MAX_DATAPOINTS][2],int nA)
+   PLF_type GAalign(double A[MAX_DATAPOINTS][3],int nA)
    {
       PLF_type C[N_CANDIDATES], nextC[N_CANDIDATES], out_C;
       double F[N_CANDIDATES],temp; /* fitness vector */
@@ -425,7 +425,10 @@ int main(int argc, char *argv[])
      
       printf("aligning data.."); fflush(stdout);
       srand48(22069);
-      for(i=0;i<N_CANDIDATES-1;i++)     // added -1 otherwise the program gets stuck in this loop ??? | 26-11-2008
+      memset(C, 0, sizeof(C));
+      memset(nextC, 0, sizeof(nextC));
+      memset(&out_C, 0, sizeof(out_C));
+      for(i=0;i<N_CANDIDATES;i++)     // the -1 that was here hid writing outside of B, fixed by making B large enough
 	  {  
     	//if (!(i%50)) printf("GAalign = %d\n", i); fflush(stdout);    //used for debugging	  
 	    C[i].B[MAX_BREAKPOINTS][1]=Xmax;
@@ -436,6 +439,9 @@ int main(int argc, char *argv[])
 	      C[i].B[j][1]=drand48()*Xmax-1;
 	      C[i].B[j][2]=drand48()*Ymax-1;
 	    }
+	    /* the top breakpoint is never mutated or deleted, start it at the end point */
+	    C[i].B[MAX_BREAKPOINTS-1][1]=Xmax;
+	    C[i].B[MAX_BREAKPOINTS-1][2]=Ymax;
 	    C[i].nB=MAX_BREAKPOINTS; 
 	    C[i]=sort_breakpoints(C[i]);
 	  }
@@ -468,35 +474,20 @@ int main(int argc, char *argv[])
 	  
 	    if(G==N_GENERATIONS)
 	    {
-	      for(i=0;i<MAX_BREAKPOINTS;i++)
-		  {
-		    out_C.B[i][1]=C[F_index[0]].B[i][1];
-		    out_C.B[i][2]=C[F_index[0]].B[i][2];
-		    out_C.nB=C[F_index[0]].nB;
-		  }
+	      out_C=C[F_index[0]];
 	      printf("done\n"); fflush(stdout);
 	      return out_C; /* return after sorting and pulling out best candidate */
 	    }
 	
 	    for(i=0;i<(int)floor((double)(FRACTION_KEPT*N_CANDIDATES+0.5));i++) /* keep FRACTION_KEPT best candidates */ //added typecasting and replaced round for floor and "+0.5" | 25-11-2008
 	    {
-	      nextC[i].nB=C[F_index[i]].nB;
-	      for(j=0;j<MAX_BREAKPOINTS-1;j++)
-		  {
-		    nextC[i].B[j][1]=C[F_index[i]].B[j][1];
-		    nextC[i].B[j][2]=C[F_index[i]].B[j][2];
-		  }
+	      nextC[i]=C[F_index[i]];
 	    }
 
 	    for(i=(int)floor((double)(FRACTION_KEPT*N_CANDIDATES+0.5));i<N_CANDIDATES;i++)
 	    { 
 	      parent=(int)floor((double)(drand48()*FRACTION_KEPT*N_CANDIDATES+0.5)); /* choose fit parent */  //added typecasting and replaced round for floor and "+0.5" | 25-11-2008
-	      nextC[i].nB=C[F_index[parent]].nB;
-	      for(j=0;j<MAX_BREAKPOINTS-1;j++)
-		  {
-		    nextC[i].B[j][1]=C[F_index[parent]].B[j][1];
-		    nextC[i].B[j][2]=C[F_index[parent]].B[j][2];
-		  }
+	      nextC[i]=C[F_index[parent]];
 	    
 	      for(j=0;j<MAX_BREAKPOINTS-1;j++) /* always leave top breakpoint? */
 		  {
@@ -526,12 +517,7 @@ int main(int argc, char *argv[])
 	 
 	    for(i=0;i<N_CANDIDATES;i++) /* update C */
 	    {
-	      C[i].nB=nextC[i].nB;
-	      for(j=0;j<MAX_BREAKPOINTS;j++)
-		  {
-		    C[i].B[j][1]=nextC[i].B[j][1];
-		    C[i].B[j][2]=nextC[i].B[j][2];
-	      }
+	      C[i]=nextC[i];
 	    }
  	  }      
     }
@@ -597,7 +583,7 @@ int main(int argc, char *argv[])
   
   /* initialize mzXML dataset 1 */
   
-  printf("checking mzXML dataset 1..."); fflush(stdout);
+  printf("checking dataset 1..."); fflush(stdout);
   mzXML_file=rampOpenFile(mzXML_filename_1);
 
     /* Read the offset of the index */
@@ -697,7 +683,7 @@ int main(int argc, char *argv[])
 
     /* initialize mzXML dataset 2 */
     
-    printf("checking mzXML dataset 2..."); fflush(stdout);
+    printf("checking dataset 2..."); fflush(stdout);
     mzXML_file=rampOpenFile(mzXML_filename_2);
 
     /* Read the offset of the index */

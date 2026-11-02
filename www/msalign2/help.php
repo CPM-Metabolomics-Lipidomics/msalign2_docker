@@ -25,7 +25,7 @@ echo "</li>\n";
 echo "<li>After starting the alignment, you can refresh the statuspage to monitor the progress. This page can also be bookmarked!</li>\n";
 echo "<li>After a file is aligned a link appears which will give you a link to show you how good / bad your alignment is. <a href=\"./images/good_example.png\">Good</a> and a <a href=\"./images/bad_example.png\">bad</a> aligment example</li>\n";
 echo "<li>After the alignment is finished a button for removing the temporary files appears. Please use this button to remove the temporary files and be redirected to the homepage again.</li>\n";
-echo "<li>Your aligned mzXML files will be located in the same folder as your original files.</li>\n";
+echo "<li>Your files can be mzXML or mzML files (MS-Numpress compressed mzML is not supported). The aligned files (<b>_ALIGNED.mzxml</b> or <b>_ALIGNED.mzML</b>) will be located in the same folder as your original files. Chromatograms (TIC, BPC) are removed from aligned mzML files.</li>\n";
 echo "</ul>\n";
 echo "</p>\n";
 

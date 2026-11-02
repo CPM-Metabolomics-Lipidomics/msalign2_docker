@@ -75,6 +75,7 @@ typedef enum { mzInt = 0 , mzRuler } e_contentType;
 typedef struct {
    ramp_filehandle_t fileHandle;
    int bIsMzData; // mzXML or mzData?
+   int bIsMzML; // mzML?
 } RAMPFILE;
 
 #ifndef _LARGEFILE_SOURCE // use MSFT API for 64 bit file pointers

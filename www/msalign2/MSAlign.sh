@@ -44,11 +44,10 @@ JOBLIST=""
 IFS="
 "
 for LINE in $LINES; do
-  OUTPUTFILE=${LINE/.[mM][zZ][xX][mM][lL]/_out.txt}
-  NEWMZXML=${LINE/.[mM][zZ][xX][mM][lL]/_ALIGNED.mzxml}
+  OUTPUTFILE="${LINE%.*}_out.txt"
   ALIGNFILE="$LINE.alignment"
   PLFFILE="$LINE.alignment.plf"
-  COMMANDLIST+="./msalign2 -1$LINE -2$2 -e$3 $TIMEWINDOW -f$5 -c$6 -d$7 -X$8 -Y$9 -R${10},${11} > $OUTPUTFILE && ( echo 'Start creating new mzXML files' >> $OUTPUTFILE; R --no-restore --no-save --no-readline '--args $LINE $2' < ./wrap_mzXML.R; echo 'Done creating new mzXML files.' >> $OUTPUTFILE; ./FeaturesPlot.sh $ALIGNFILE $PLFFILE; echo 'Finished aligning!' >> $OUTPUTFILE )
+  COMMANDLIST+="./msalign2 -1$LINE -2$2 -e$3 $TIMEWINDOW -f$5 -c$6 -d$7 -X$8 -Y$9 -R${10},${11} > $OUTPUTFILE && ( echo 'Start creating aligned file' >> $OUTPUTFILE; R --no-restore --no-save --no-readline '--args $LINE $2' < ./wrap_mzXML.R; echo 'Done creating aligned file.' >> $OUTPUTFILE; ./FeaturesPlot.sh $ALIGNFILE $PLFFILE; echo 'Finished aligning!' >> $OUTPUTFILE )
   "
 done
 

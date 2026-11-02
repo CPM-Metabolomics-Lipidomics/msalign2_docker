@@ -21,7 +21,7 @@ if ($Settings[Status] == "align")
   foreach ($FilesOut as $value)
   {
     $StatusFiles .= "<tr><td><b>" .$value ."</b><br>";
-    $FileNameTXT = str_ireplace(".mzxml", "_out.txt", $value);
+    $FileNameTXT = preg_replace('/\.mz(xml|ml)$/i', '_out.txt', $value);
   
     $checkfile = FALSE;
     $i = 0;

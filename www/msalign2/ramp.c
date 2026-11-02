@@ -91,6 +91,403 @@ static void getIsLittleEndian(const char *buf, int *result) {
    // leave *result alone if we don't see anything!
 }
 
+/****************************************************************
+ * mzML helper functions					*
+ ***************************************************************/
+
+/*
+ * Reads a spectrum element starting at offset, up to stopTag or the
+ * end of the spectrum, whichever comes first.
+ * Returns a null terminated buffer that becomes property of the caller.
+ */
+static char *mzmlReadSpectrum(RAMPFILE *pFI, ramp_fileoffset_t offset, const char *stopTag)
+{
+   size_t alloc = 4096;
+   size_t size = 0;
+   size_t search = 0; // where to start looking for the stop tag
+   size_t nread;
+   char *result = (char *) malloc(alloc + 1);
+   char *end;
+
+   if (!result) {
+      printf("Cannot allocate memory\n");
+      return NULL;
+   }
+   ramp_fseek(pFI, offset, SEEK_SET);
+   while (1) {
+      if (size == alloc) {
+         char *tmp = (char *) realloc(result, 2 * alloc + 1);
+         if (!tmp) {
+            printf("Cannot allocate memory\n");
+            free(result);
+            return NULL;
+         }
+         result = tmp;
+         alloc *= 2;
+      }
+      nread = ramp_fread(result + size, alloc - size, pFI);
+      if (nread == 0) {
+         break; // end of file
+      }
+      size += nread;
+      result[size] = 0;
+      if (strstr(result + search, stopTag) || strstr(result + search, "</spectrum>")) {
+         break;
+      }
+      search = size > 32 ? size - 32 : 0; // the tag may overhang the end of the buffer
+   }
+   result[size] = 0;
+   // cut off everything after the stop tag, it belongs to the next element
+   if ((end = strstr(result, stopTag))) {
+      *end = 0;
+   }
+   if ((end = strstr(result, "</spectrum>"))) {
+      *end = 0;
+   }
+   return result;
+}
+
+/*
+ * Finds attribute attr in the tag starting at tag.
+ * Returns a pointer to the (not null terminated) value and its length in *len,
+ * or NULL if the tag doesn't have the attribute.
+ */
+static const char *mzmlAttr(const char *tag, const char *attr, int *len)
+{
+   const char *tagEnd = strchr(tag, '>');
+   const char *p = tag;
+   size_t attrLen = strlen(attr);
+
+   while ((p = strstr(p + 1, attr)) && (!tagEnd || p < tagEnd)) {
+      if (isspace((unsigned char) p[-1]) && (p[attrLen] == '=') && isquot(p[attrLen + 1])) {
+         const char *value = p + attrLen + 2;
+         const char *valueEnd = strchr(value, p[attrLen + 1]);
+         if (!valueEnd) {
+            return NULL;
+         }
+         *len = (int) (valueEnd - value);
+         return value;
+      }
+   }
+   return NULL;
+}
+
+/*
+ * Finds the cvParam with the given accession between start and end (NULL = end of string).
+ * Returns a pointer to the cvParam tag, or NULL if not found.
+ */
+static const char *mzmlFindCv(const char *start, const char *end, const char *accession)
+{
+   const char *p = start;
+   int accLen = (int) strlen(accession);
+
+   while ((p = strstr(p, "<cvParam")) && (!end || p < end)) {
+      int len;
+      const char *acc = mzmlAttr(p, "accession", &len);
+      if (acc && (len == accLen) && !strncmp(acc, accession, accLen)) {
+         return p;
+      }
+      p += 8;
+   }
+   return NULL;
+}
+
+/*
+ * Reads the value of the cvParam with the given accession into *value.
+ * Returns 1 if found, 0 otherwise.
+ */
+static int mzmlCvDouble(const char *start, const char *end, const char *accession, double *value)
+{
+   int len;
+   const char *v;
+   const char *cv = mzmlFindCv(start, end, accession);
+
+   if (!cv) {
+      return 0;
+   }
+   v = mzmlAttr(cv, "value", &len);
+   *value = v ? atof(v) : 0.0;
+   return 1;
+}
+
+/*
+ * Reads a time cvParam, returns the time in seconds.
+ */
+static double mzmlTime(const char *cv)
+{
+   int len;
+   const char *unit;
+   const char *v = mzmlAttr(cv, "value", &len);
+   double t = v ? atof(v) : 0.0;
+
+   if (((unit = mzmlAttr(cv, "unitAccession", &len)) && !strncmp(unit, "UO:0000031", len)) ||
+       ((unit = mzmlAttr(cv, "unitName", &len)) && !strncmp(unit, "minute", len))) {
+      t *= 60.0;
+   } else if (((unit = mzmlAttr(cv, "unitAccession", &len)) && !strncmp(unit, "UO:0000028", len)) ||
+              ((unit = mzmlAttr(cv, "unitName", &len)) && !strncmp(unit, "millisecond", len))) {
+      t /= 1000.0;
+   }
+   return t;
+}
+
+/*
+ * Decodes one binaryDataArray (between arr and arrEnd) into count doubles.
+ * Returns the number of values decoded.
+ * Stops the program if the array uses a compression we can't read.
+ */
+static int mzmlDecodeArray(const char *arr, const char *arrEnd, int count, double *values)
+{
+   int endtest = 1;
+   int weAreLittleEndian = *((char *)&endtest);
+   int bytesPerValue = 4;
+   int isFloat = 1;
+   int isCompressed = 0;
+   int n, len;
+   size_t encodedLen = 0, decodedLen;
+   const char *binary, *p;
+   char *encoded, *decoded;
+   unsigned char *data;
+
+   // precision
+   if (mzmlFindCv(arr, arrEnd, "MS:1000523")) { // 64-bit float
+      bytesPerValue = 8;
+   } else if (mzmlFindCv(arr, arrEnd, "MS:1000519")) { // 32-bit integer
+      isFloat = 0;
+   } else if (mzmlFindCv(arr, arrEnd, "MS:1000522")) { // 64-bit integer
+      bytesPerValue = 8;
+      isFloat = 0;
+   }
+
+   // compression
+   if (mzmlFindCv(arr, arrEnd, "MS:1000574")) { // zlib
+      isCompressed = 1;
+   } else if (!mzmlFindCv(arr, arrEnd, "MS:1000576")) { // not "no compression" either
+      p = strstr(arr, "Numpress");
+      if (p && (p < arrEnd)) {
+         printf("\nMS-Numpress compressed mzML files are not supported, convert the file without numpress, aborted!\n");
+      } else {
+         printf("\nUnsupported compression in mzML file, convert the file with zlib or no compression, aborted!\n");
+      }
+      fflush(stdout);
+      exit(42);
+   }
+
+   // number of values in this array
+   if ((p = mzmlAttr(arr, "arrayLength", &len)) && (atoi(p) < count)) {
+      count = atoi(p);
+   }
+   if (count <= 0) {
+      return 0;
+   }
+
+   // find the base64 text
+   binary = strstr(arr, "<binary>");
+   if (!binary || (binary > arrEnd)) {
+      return 0;
+   }
+   binary += 8;
+   p = strchr(binary, '<');
+   if (!p) {
+      return 0;
+   }
+   if ((encoded = (char *) malloc(p - binary + 1)) == NULL) {
+      printf("Cannot allocate memory\n");
+      return 0;
+   }
+   for (; binary < p; binary++) { // whitespace may be present in base64 char stream
+      if (!isspace((unsigned char) *binary)) {
+         encoded[encodedLen++] = *binary;
+      }
+   }
+   encoded[encodedLen] = 0;
+
+   decodedLen = (encodedLen / 4) * 3;
+   if ((decoded = (char *) malloc(decodedLen + 1)) == NULL) {
+      printf("Cannot allocate memory\n");
+      free(encoded);
+      return 0;
+   }
+   b64_decode_mio(decoded, encoded);
+   // every '=' padding character at the end means one byte less
+   for (len = (int) encodedLen - 1; (len >= 0) && (encoded[len] == '=') && (decodedLen > 0); len--) {
+      decodedLen--;
+   }
+   free(encoded);
+
+   if (isCompressed) {
+      uLong uncomprLen = (uLong) count * bytesPerValue;
+      data = (unsigned char *) calloc(uncomprLen + 1, 1);
+      if (!data) {
+         printf("Cannot allocate memory\n");
+         free(decoded);
+         return 0;
+      }
+      if (uncompress(data, &uncomprLen, (const Bytef *) decoded, decodedLen) != Z_OK) {
+         printf("Error uncompressing mzML data\n");
+      }
+      free(decoded);
+      if ((int) (uncomprLen / bytesPerValue) < count) {
+         count = (int) (uncomprLen / bytesPerValue);
+      }
+   } else {
+      data = (unsigned char *) decoded;
+      if ((int) (decodedLen / bytesPerValue) < count) {
+         count = (int) (decodedLen / bytesPerValue);
+      }
+   }
+
+   // mzML binary data is always little endian
+   for (n = 0; n < count; n++) {
+      if (bytesPerValue == 4) {
+         uint32_t u;
+         memcpy(&u, data + 4 * n, 4);
+         if (!weAreLittleEndian) {
+            u = swapbytes(u);
+         }
+         if (isFloat) {
+            float f;
+            memcpy(&f, &u, 4);
+            values[n] = (double) f;
+         } else {
+            values[n] = (double) (int32_t) u;
+         }
+      } else {
+         uint64_t u;
+         memcpy(&u, data + 8 * n, 8);
+         if (!weAreLittleEndian) {
+            u = swapbytes64(u);
+         }
+         if (isFloat) {
+            double d;
+            memcpy(&d, &u, 8);
+            values[n] = d;
+         } else {
+            values[n] = (double) (int64_t) u;
+         }
+      }
+   }
+   free(data);
+   return count;
+}
+
+/*
+ * Reads the scan header of the mzML spectrum at lScanIndex.
+ * scanHeader must be initialized with the defaults already.
+ */
+static void mzmlReadHeader(RAMPFILE *pFI,
+                           ramp_fileoffset_t lScanIndex,
+                           struct ScanHeaderStruct *scanHeader)
+{
+   char *spectrum = mzmlReadSpectrum(pFI, lScanIndex, "<binaryDataArrayList");
+   const char *tag, *cv, *v;
+   double value;
+   int len;
+
+   if (!spectrum) {
+      return;
+   }
+   if ((tag = strstr(spectrum, "<spectrum ")) != NULL) {
+      if ((v = mzmlAttr(tag, "index", &len))) {
+         scanHeader->acquisitionNum = atoi(v) + 1; // mzML index is 0-based
+      }
+      if ((v = mzmlAttr(tag, "defaultArrayLength", &len))) {
+         scanHeader->peaksCount = atoi(v);
+      }
+      if (mzmlCvDouble(tag, NULL, "MS:1000511", &value)) { // ms level
+         scanHeader->msLevel = (int) value;
+      } else if (mzmlFindCv(tag, NULL, "MS:1000579")) { // MS1 spectrum
+         scanHeader->msLevel = 1;
+      }
+      if ((cv = mzmlFindCv(tag, NULL, "MS:1000016"))) { // scan start time
+         scanHeader->retentionTime = mzmlTime(cv);
+      }
+      if (mzmlCvDouble(tag, NULL, "MS:1000501", &value) || // scan window lower limit
+          mzmlCvDouble(tag, NULL, "MS:1000528", &value)) { // lowest observed m/z
+         scanHeader->lowMZ = value;
+      }
+      if (mzmlCvDouble(tag, NULL, "MS:1000500", &value) || // scan window upper limit
+          mzmlCvDouble(tag, NULL, "MS:1000527", &value)) { // highest observed m/z
+         scanHeader->highMZ = value;
+      }
+      mzmlCvDouble(tag, NULL, "MS:1000285", &(scanHeader->totIonCurrent));
+      mzmlCvDouble(tag, NULL, "MS:1000504", &(scanHeader->basePeakMZ));
+      mzmlCvDouble(tag, NULL, "MS:1000505", &(scanHeader->basePeakIntensity));
+      mzmlCvDouble(tag, NULL, "MS:1000744", &(scanHeader->precursorMZ)); // selected ion m/z
+      if (mzmlCvDouble(tag, NULL, "MS:1000041", &value)) { // charge state
+         scanHeader->precursorCharge = (int) value;
+      }
+      if (mzmlCvDouble(tag, NULL, "MS:1000042", &value)) { // peak intensity
+         scanHeader->precursorIntensity = value;
+      }
+   }
+   free(spectrum);
+}
+
+/*
+ * Reads the peaks of the mzML spectrum at lScanIndex.
+ * Returns a RAMPREAL* with m/z-int pairs, terminated by -1, which becomes
+ * property of the caller, or NULL if the spectrum has no m/z or intensity array.
+ */
+static RAMPREAL *mzmlReadPeaks(RAMPFILE *pFI,
+                               ramp_fileoffset_t lScanIndex)
+{
+   char *spectrum = mzmlReadSpectrum(pFI, lScanIndex, "</spectrum>");
+   const char *tag, *arr, *arrEnd, *v;
+   double *mz = NULL;
+   double *inten = NULL;
+   int nMz = 0, nInten = 0;
+   int peaksCount = 0;
+   int len, n;
+   RAMPREAL *pPeaks = NULL;
+
+   if (!spectrum) {
+      return NULL;
+   }
+   if (!(tag = strstr(spectrum, "<spectrum ")) || !(v = mzmlAttr(tag, "defaultArrayLength", &len)) ||
+       ((peaksCount = atoi(v)) <= 0)) {
+      free(spectrum);
+      return NULL; // No peaks in this scan!!
+   }
+   mz = (double *) malloc(peaksCount * sizeof(double));
+   inten = (double *) malloc(peaksCount * sizeof(double));
+   if (!mz || !inten) {
+      printf("Cannot allocate memory\n");
+      free(mz);
+      free(inten);
+      free(spectrum);
+      return NULL;
+   }
+
+   // intensity and mz are written in two different arrays
+   for (arr = tag; (arr = strstr(arr, "<binaryDataArray ")); arr = arrEnd) {
+      if (!(arrEnd = strstr(arr, "</binaryDataArray>"))) {
+         break;
+      }
+      if (mzmlFindCv(arr, arrEnd, "MS:1000514")) { // m/z array
+         nMz = mzmlDecodeArray(arr, arrEnd, peaksCount, mz);
+      } else if (mzmlFindCv(arr, arrEnd, "MS:1000515")) { // intensity array
+         nInten = mzmlDecodeArray(arr, arrEnd, peaksCount, inten);
+      }
+   }
+   free(spectrum);
+
+   if ((nMz > 0) && (nInten > 0)) {
+      peaksCount = nMz < nInten ? nMz : nInten;
+      if ((pPeaks = (RAMPREAL *) malloc((peaksCount + 1) * 2 * sizeof(RAMPREAL))) == NULL) {
+         printf("Cannot allocate memory\n");
+      } else {
+         for (n = 0; n < peaksCount; n++) {
+            pPeaks[2 * n] = (RAMPREAL) mz[n];
+            pPeaks[2 * n + 1] = (RAMPREAL) inten[n];
+         }
+         pPeaks[2 * peaksCount] = -1; // some callers want a terminator
+      }
+   }
+   free(mz);
+   free(inten);
+   return pPeaks; // caller must free this pointer
+}
+
 /**************************************************
 * open and close files *
 **************************************************/
@@ -113,7 +510,10 @@ RAMPFILE *rampOpenFile(const char *filename) {
         buf[sizeof(buf)-1] = 0;
         while (!ramp_feof(result)) {
            ramp_fgets(buf,sizeof(buf)-1,result);
-           if (strstr(buf,"<msRun")) {
+           if (strstr(buf,"<mzML")) {
+              result->bIsMzML = 1;
+              break;
+           } else if (strstr(buf,"<msRun")) {
               result->bIsMzData = 0;
               break;
            } else if (strstr(buf,"<mzData")) {
@@ -187,10 +587,11 @@ ramp_fileoffset_t getIndexOffset(RAMPFILE *pFI)
       return -1; // no index in mzData
    }
 
-   for (indexOffsetOffset = -120;  indexOffsetOffset++ < 0 ;)
+   // in mzML the fileChecksum follows the indexListOffset, so look further back
+   for (indexOffsetOffset = pFI->bIsMzML ? -400 : -120;  indexOffsetOffset++ < 0 ;)
    {
       char seekbuf[SIZE_BUF+1];
-      char *target = "<indexOffset>";
+      char *target = pFI->bIsMzML ? "<indexListOffset>" : "<indexOffset>";
       int  nread;
 
       ramp_fseek(pFI, indexOffsetOffset, SEEK_END);
@@ -256,7 +657,7 @@ ramp_fileoffset_t *readIndex(RAMPFILE *pFI,
      free(pScanIndex);
       if ((indexOffset < 0) || (retryLoop==0)) { // derive the index by inspection
          // no index found, derive it
-         const char *scantag = pFI->bIsMzData?"<spectrum id":"<scan";
+         const char *scantag = pFI->bIsMzML?"<spectrum ":(pFI->bIsMzData?"<spectrum id":"<scan");
          int taglen = (int)strlen(scantag);
          ramp_fileoffset_t index = 0;
          pScanIndex = (ramp_fileoffset_t *)malloc( sizeof(ramp_fileoffset_t)*reallocSize); // allocate space for the scan index info
@@ -264,12 +665,14 @@ ramp_fileoffset_t *readIndex(RAMPFILE *pFI,
             printf("Cannot allocate memory\n");
             return NULL;
          }
+         int nbytes;
          ramp_fseek(pFI,0,SEEK_SET);
          buf[sizeof(buf)-1] = 0;
-         while ((int)ramp_fread(buf,sizeof(buf)-1,pFI)>taglen) {
+         while ((nbytes = (int)ramp_fread(buf,sizeof(buf)-1,pFI))>taglen) {
             char *find;
             char *look=buf;
             int nread;
+            buf[nbytes] = 0; // a short read at the end of the file leaves old data behind
             while (NULL != (find = strstr(look,scantag))) {
                pScanIndex[n++] = index+(find-buf); // ramp is 1-based
                (*iLastScan)++;
@@ -303,12 +706,20 @@ ramp_fileoffset_t *readIndex(RAMPFILE *pFI,
          ramp_fseek(pFI, indexOffset, SEEK_SET);
          
          s = ramp_fgets(buf, SIZE_BUF, pFI);
+         if (pFI->bIsMzML) { // skip to the spectrum index, the chromatogram index may come first
+            while( s!=NULL && !strstr( buf , "name=\"spectrum\"" ) ) {
+               s = ramp_fgets(buf, SIZE_BUF, pFI);
+            }
+            if (s != NULL) {
+               s = ramp_fgets(buf, SIZE_BUF, pFI);
+            }
+         }
          while( s!=NULL && !strstr( buf , "<offset" ) ) {
             s = ramp_fgets(buf, SIZE_BUF, pFI);
          }
          
          if (s == NULL)
-            break;   // end of file reached.
+            continue;   // end of file reached, derive the index by inspection
          
          while (!strstr(buf, "/index")) {
             if ((beginScanOffset = (char *) (strstr(buf, ">"))) == NULL) {
@@ -504,7 +915,9 @@ void readHeader(RAMPFILE *pFI,
    scanHeader->seqNum = -1;
 
 
-   if (pFI->bIsMzData) {
+   if (pFI->bIsMzML) {
+      mzmlReadHeader(pFI, lScanIndex, scanHeader);
+   } else if (pFI->bIsMzData) {
       int bHasPrecursor = 0;
       while (ramp_nextTag(stringBuf, SIZE_BUF, pFI))
       {
@@ -740,6 +1153,12 @@ double readStartMz(RAMPFILE *pFI,
   char *pStr;
   const char *tag = pFI->bIsMzData?"mzRangeStart":"startMz";
 
+  if (pFI->bIsMzML) {
+     struct ScanHeaderStruct header;
+     readHeader(pFI, lScanIndex, &header);
+     return (header.lowMZ != LOWMZ_UNINIT) ? header.lowMZ : startMz;
+  }
+
   ramp_fseek(pFI, lScanIndex, SEEK_SET);
    
   while (ramp_fgets(stringBuf, SIZE_BUF, pFI))
@@ -770,6 +1189,12 @@ double readEndMz(RAMPFILE *pFI,
   double endMz = 0.0;
   char *pStr;
   const char *tag = pFI->bIsMzData?"mzRangeStop":"endMz";
+
+  if (pFI->bIsMzML) {
+     struct ScanHeaderStruct header;
+     readHeader(pFI, lScanIndex, &header);
+     return header.highMZ;
+  }
 
   ramp_fseek(pFI, lScanIndex, SEEK_SET);
    
@@ -945,6 +1370,10 @@ RAMPREAL *readPeaks(RAMPFILE *pFI,
 
    char buf[1000];
    buf[sizeof(buf)-1] = 0;
+
+   if (pFI->bIsMzML) {
+      return mzmlReadPeaks(pFI, lScanIndex);
+   }
 
    if (pFI->bIsMzData) {
       // intensity and mz are written in two different arrays

@@ -93,7 +93,7 @@ if ($Settings[Status] != "parameters")
         echo "</table>";
       echo "</td><td width=\"50%\">";
         // formulate the command, make sure to add > for redirecting output to a file
-        $ListFiles = "find " .str_replace(" ","\ ",$DataDir) ."/ -iname \"*.mzxml\"" ." -maxdepth 1 -type f";
+        $ListFiles = "find " .str_replace(" ","\ ",$DataDir) ."/ \\( -iname \"*.mzxml\" -o -iname \"*.mzml\" \\)" ." -maxdepth 1 -type f";
         // executes the command and writes the input to a file
         exec($ListFiles, $FileNames);
         sort($FileNames);
