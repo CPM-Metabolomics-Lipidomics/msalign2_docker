@@ -340,9 +340,9 @@ int main(int argc, char *argv[])
   ramp_fileoffset_t offset, *scan_index;
   struct ScanHeaderStruct scan_header;
   struct RunHeaderStruct run_header;
-  int nographics, MS_start_scan, MS_end_scan, SetFeatures, CountFeatures, assumed_charge, n_masses, n_unique_masses, n_unique_masses1, n_unique_masses2, *SIC_1_argmax, *SIC_2_argmax, *SIC_2a_argmax, range[2], seen_before, LC_sigma_set, Xmax_set, Ymax_set, non_matched;
+  int nographics, SetFeatures, CountFeatures, assumed_charge, n_masses, n_unique_masses, n_unique_masses1, n_unique_masses2, range[2], seen_before, LC_sigma_set, Xmax_set, Ymax_set, non_matched;
   long i, j, k, n;
-  double max_mass_measurement_error, start_scan, end_scan, intensity_sum, *SIC_1_max, *SIC_2_max, *SIC_2a_max, A[MAX_DATAPOINTS][2], scan_diff[MAX_DATAPOINTS], scan_diff_median, intensity_max, scan_intensity_max, *SIC_1_max_mz, *SIC_2_max_mz, *SIC_2a_max_mz, error[MAX_DATAPOINTS], swap, sum_squared_deviation, LC_sigma, Xmax, Xmax_temp, Ymax, background, oldbackground1, background1, background2, oldbackground2, costs, argFitness;
+  double max_mass_measurement_error, MS_start_rt, MS_end_rt, end1, end2, last_x, last_y, *SIC_1_argmax, *SIC_2_argmax, *SIC_2a_argmax, start_scan, end_scan, intensity_sum, *SIC_1_max, *SIC_2_max, *SIC_2a_max, A[MAX_DATAPOINTS][2], scan_diff[MAX_DATAPOINTS], scan_diff_median, intensity_max, scan_intensity_max, *SIC_1_max_mz, *SIC_2_max_mz, *SIC_2a_max_mz, error[MAX_DATAPOINTS], swap, sum_squared_deviation, LC_sigma, Xmax, Xmax_temp, Ymax, background, oldbackground1, background1, background2, oldbackground2, costs, argFitness;
   int go, r, SumFeatures, SetBackground, feature_index, CountAttempts; 
   
   double mimass[5]={1.0078250321,12,14.0030740052,15.9949146221,31.97207069};
@@ -541,18 +541,19 @@ int main(int argc, char *argv[])
   
   if( (argc==2) && ( (strcmp(argv[1],"--help")==0) || (strcmp(argv[1],"-help")==0) || (strcmp(argv[1],"-h")==0)) ) /* want help? */
     {
-      printf("msalign - (c) Magnus Palmblad 2007-\n\nusage: msalign -1<LC-MS dataset 1 filename> -2<LC-MS dataset 2 filename> -e<max. mass error in MS-only data (in ppm)>  [-b<background> -l<typical standard deviation in LC retention time in LC-MS data> -X<Xmax> -Y<Ymax> -R<MS start scan>,<MS end scan> -o<output file> -nographics]\n\nfor more information, see http://www.ms-utils.org/msalign or e-mail magnus.palmblad@gmail.com\n");
+      printf("msalign - (c) Magnus Palmblad 2007-\n\nusage: msalign -1<LC-MS dataset 1 filename> -2<LC-MS dataset 2 filename> -e<max. mass error in MS-only data (in ppm)>  [-b<background> -l<typical standard deviation in LC retention time in LC-MS data (s)> -X<Xmax (s), 0 = end of run> -Y<Ymax (s), 0 = end of run> -R<start retention time (s)>,<end retention time (s), 0 = end of run> -o<output file> -nographics]\n\nfor more information, see http://www.ms-utils.org/msalign or e-mail magnus.palmblad@gmail.com\n");
       return 0;
     }
   
   if (argc<4 || argc>18) /* check for incorrect number of parameters */
     {
-      printf("usage: msalign -1<LC-MS dataset 1 filename> -2<LC-MS dataset 2 filename> -e<max. mass error in MS-only data (in ppm)>  [-b<background> -l<typical standard deviation in LC retention time in LC-MS data> -X<Xmax> -Y<Ymax> -R<MS start scan>,<MS end scan> -o<output file> -nographics] (type msalign --help for more information)\n");
+      printf("usage: msalign -1<LC-MS dataset 1 filename> -2<LC-MS dataset 2 filename> -e<max. mass error in MS-only data (in ppm)>  [-b<background> -l<typical standard deviation in LC retention time in LC-MS data (s)> -X<Xmax (s), 0 = end of run> -Y<Ymax (s), 0 = end of run> -R<start retention time (s)>,<end retention time (s), 0 = end of run> -o<output file> -nographics] (type msalign --help for more information)\n");
       return -1;
     }
   
 
   LC_sigma_set=0; Xmax_set=0; Ymax_set=0;
+  MS_start_rt=0; MS_end_rt=0; /* default: the whole run */
   for(i=1;i<argc;i++) {
     if( (argv[i][0]=='-') && (argv[i][1]=='1') ) 
       {
@@ -572,7 +573,7 @@ int main(int argc, char *argv[])
     if( (argv[i][0]=='-') && (argv[i][1]=='R') ) 
       {
 	strcpy(temp,&argv[strlen(argv[i])>2?i:i+1][strlen(argv[i])>2?2:0]); p=strtok(temp,","); 
-	MS_start_scan=atof(p); p=strtok('\0',","); MS_end_scan=atof(p);
+	MS_start_rt=atof(p); p=strtok(NULL,","); if(p) MS_end_rt=atof(p);
       }
     if( (argv[i][0]=='-') && (argv[i][1]=='l') ) 
       {
@@ -607,22 +608,23 @@ int main(int argc, char *argv[])
     
     fflush(stdout);
     readRunHeader(mzXML_file, pScanIndex, &runHeader, iLastScan);
+    end1=runHeader.dEndTime; /* retention time of the last scan of dataset 1 */
 
     n_unique_masses=MAX_DATAPOINTS;
     n_unique_masses1=MAX_DATAPOINTS;
     n_unique_masses2=MAX_DATAPOINTS;
     SIC_1_max=(double*) malloc(n_unique_masses*sizeof(double));
-    SIC_1_argmax=(int*) malloc(n_unique_masses*sizeof(int));
+    SIC_1_argmax=(double*) malloc(n_unique_masses*sizeof(double));
     SIC_2_max=(double*) malloc(n_unique_masses*sizeof(double));
-    SIC_2_argmax=(int*) malloc(n_unique_masses*sizeof(int));
+    SIC_2_argmax=(double*) malloc(n_unique_masses*sizeof(double));
     SIC_2a_max=(double*) malloc(n_unique_masses*sizeof(double));
-    SIC_2a_argmax=(int*) malloc(n_unique_masses*sizeof(int));
+    SIC_2a_argmax=(double*) malloc(n_unique_masses*sizeof(double));
     SIC_1_max_mz=(double*) malloc(n_unique_masses*sizeof(double));
     SIC_2_max_mz=(double*) malloc(n_unique_masses*sizeof(double));
     SIC_2a_max_mz=(double*) malloc(n_unique_masses*sizeof(double));
     n_masses = MAX_DATAPOINTS;                     // no value was asigned to n_masses so this was added!!!!
 
-    printf("done\nreading MS scans between %d and %d...",MS_start_scan,MS_end_scan); fflush(stdout);
+    printf("done\nreading MS scans between %1.1f and %1.1f s...",MS_start_rt,MS_end_rt>0?MS_end_rt:end1); fflush(stdout);
     go = 1;    //initalize the background checking
     CountFeatures = 0;
     background1 = 100000;
@@ -634,9 +636,10 @@ int main(int argc, char *argv[])
     for(k=0;k<n_masses;k++) {SIC_1_max[k]=0.0; SIC_1_argmax[k]=-1; SIC_1_max_mz[k]=0.0;}
     for(k=0;k<n_masses;k++) {SIC_2_max[k]=0.0; SIC_2_argmax[k]=-1; SIC_2_max_mz[k]=0.0;}   // this comes back later, why??
     n_MS_spectra=0; n_unique_masses1=0;
-    for(range[0]=MS_start_scan;range[0]<MS_end_scan;range[0]++)
+    for(range[0]=1;range[0]<=iLastScan;range[0]++)
     { 
       readHeader(mzXML_file, pScanIndex[range[0]], &scanHeader);
+      if((scanHeader.retentionTime<MS_start_rt)||((MS_end_rt>0)&&(scanHeader.retentionTime>MS_end_rt))) continue; /* outside retention time range */
       if((scanHeader.msLevel==1) && (scanHeader.peaksCount>0)) /* non-empty MS spectrum? */
       {
         range[1]=range[0];
@@ -651,13 +654,13 @@ int main(int argc, char *argv[])
 	      if(((fabs(mzXML_spectrum.xval[i]-SIC_1_max_mz[k]))/SIC_1_max_mz[k]*1e6)<max_mass_measurement_error) 
 	      {
 	        new_mass=0;
-	        if(mzXML_spectrum.yval[i]>SIC_1_max[k]) {SIC_1_max[k]=mzXML_spectrum.yval[i]; SIC_1_argmax[k]=range[0];}
+	        if(mzXML_spectrum.yval[i]>SIC_1_max[k]) {SIC_1_max[k]=mzXML_spectrum.yval[i]; SIC_1_argmax[k]=scanHeader.retentionTime;}
  	      }
 	    }
 	    if(new_mass==1) 
 	    {
 	      n_unique_masses1++;
-	      SIC_1_max_mz[k]=mzXML_spectrum.xval[i]; SIC_1_max[k]=mzXML_spectrum.yval[i]; SIC_1_argmax[k]=range[0];
+	      SIC_1_max_mz[k]=mzXML_spectrum.xval[i]; SIC_1_max[k]=mzXML_spectrum.yval[i]; SIC_1_argmax[k]=scanHeader.retentionTime;
 	    }
 	  }
 	}
@@ -705,8 +708,9 @@ int main(int argc, char *argv[])
     
     fflush(stdout);
     readRunHeader(mzXML_file, pScanIndex, &runHeader, iLastScan);
+    end2=runHeader.dEndTime; /* retention time of the last scan of dataset 2 */
 
-    printf("done\nreading MS scans between %d and %d...",MS_start_scan,MS_end_scan); fflush(stdout);
+    printf("done\nreading MS scans between %1.1f and %1.1f s...",MS_start_rt,MS_end_rt>0?MS_end_rt:end2); fflush(stdout);
     go = 1;    //initalize the background checking
     CountFeatures = 0;
     background2 = 100000;
@@ -717,9 +721,10 @@ int main(int argc, char *argv[])
   {
     for(k=0;k<n_masses;k++) {SIC_2a_max[k]=0.0; SIC_2a_argmax[k]=-1; SIC_2a_max_mz[k]=0.0;}   // this comes back later, why??
     n_MS_spectra=0; n_unique_masses2=0;
-    for(range[0]=MS_start_scan;range[0]<MS_end_scan;range[0]++)
+    for(range[0]=1;range[0]<=iLastScan;range[0]++)
     { 
       readHeader(mzXML_file, pScanIndex[range[0]], &scanHeader);
+      if((scanHeader.retentionTime<MS_start_rt)||((MS_end_rt>0)&&(scanHeader.retentionTime>MS_end_rt))) continue; /* outside retention time range */
       if((scanHeader.msLevel==1) && (scanHeader.peaksCount>0)) /* non-empty MS spectrum? */
       {
         range[1]=range[0];
@@ -734,13 +739,13 @@ int main(int argc, char *argv[])
 	      if(((fabs(mzXML_spectrum.xval[i]-SIC_2a_max_mz[k]))/SIC_2a_max_mz[k]*1e6)<max_mass_measurement_error) 
 	      {
 	        new_mass=0;
-	        if(mzXML_spectrum.yval[i]>SIC_2a_max[k]) {SIC_2a_max[k]=mzXML_spectrum.yval[i]; SIC_2a_argmax[k]=range[0];}
+	        if(mzXML_spectrum.yval[i]>SIC_2a_max[k]) {SIC_2a_max[k]=mzXML_spectrum.yval[i]; SIC_2a_argmax[k]=scanHeader.retentionTime;}
  	      }
 	    }
 	    if(new_mass==1) 
 	    {
 	      n_unique_masses2++;
-	      SIC_2a_max_mz[k]=mzXML_spectrum.xval[i]; SIC_2a_max[k]=mzXML_spectrum.yval[i]; SIC_2a_argmax[k]=range[0];
+	      SIC_2a_max_mz[k]=mzXML_spectrum.xval[i]; SIC_2a_max[k]=mzXML_spectrum.yval[i]; SIC_2a_argmax[k]=scanHeader.retentionTime;
 	    }
 	  }
 	}
@@ -794,10 +799,10 @@ int main(int argc, char *argv[])
 
     if ((outp=fopen(output_filename, "w"))==NULL) {printf("error opening output file %s",output_filename); return -1;}
 
-    fprintf(outp,"m/z 1\tintensity 1\tscan 1\tm/z 2\tintensity 2\tscan 2\n");
+    fprintf(outp,"m/z 1\tintensity 1\tRT 1\tm/z 2\tintensity 2\tRT 2\n");
     for(k=0;k<n_unique_masses;k++) 
     {		
-	  fprintf(outp,"%1.4f %1.1f %d %1.4f %1.1f %d\n",SIC_1_max_mz[k], SIC_1_max[k], SIC_1_argmax[k], SIC_2_max_mz[k], SIC_2_max[k], SIC_2_argmax[k]); 
+	  fprintf(outp,"%1.4f %1.1f %1.3f %1.4f %1.1f %1.3f\n",SIC_1_max_mz[k], SIC_1_max[k], SIC_1_argmax[k], SIC_2_max_mz[k], SIC_2_max[k], SIC_2_argmax[k]); 
 	  A[k][1]=SIC_1_argmax[k];
 	  A[k][2]=SIC_2_argmax[k];
 	  error[k]=1e6*(SIC_2_max_mz[k]-SIC_1_max_mz[k])/SIC_1_max_mz[k];
@@ -882,8 +887,8 @@ int main(int argc, char *argv[])
 
     }
 
-    if(!Xmax_set) Xmax=floor((double)(Xmax_temp*1.2+0.5)); 
-    if(!Ymax_set) Ymax=floor((double)(MS_end_scan*1.2+0.5));
+    if((!Xmax_set)||(Xmax<=0)) Xmax=end1; 
+    if((!Ymax_set)||(Ymax<=0)) Ymax=end2;
     //printf("Xmax=%4.2f, Ymax=%4.2f\n",Xmax,Ymax); fflush(stdout);
 
     best_C=GAalign(A,n_unique_masses); /* align the LC-MS/MS and LC-MS datasets */
@@ -893,14 +898,19 @@ int main(int argc, char *argv[])
     
     printf("best fit = [0.0 0.0");
     fprintf(outp,"0.0 0.0\n");
+    last_x=0; last_y=0;
     for(i=0;i<MAX_BREAKPOINTS;i++)
     {
-      if(best_C.B[i][1]>0) 
+      /* keep the PLF strictly increasing and inside both runs, so the order of all scans is preserved */
+      if((best_C.B[i][1]>last_x)&&(best_C.B[i][2]>last_y)&&(best_C.B[i][1]<end1)&&(best_C.B[i][2]<end2)) 
 	  {
-	    printf("; %1.1f %1.1f",best_C.B[i][1],best_C.B[i][2]);
-	    fprintf(outp,"%1.1f %1.1f\n",best_C.B[i][1],best_C.B[i][2]);
+	    printf("; %1.3f %1.3f",best_C.B[i][1],best_C.B[i][2]);
+	    fprintf(outp,"%1.3f %1.3f\n",best_C.B[i][1],best_C.B[i][2]);
+	    last_x=best_C.B[i][1]; last_y=best_C.B[i][2];
 	  }
     }
+    printf("; %1.3f %1.3f",end1,end2);
+    fprintf(outp,"%1.3f %1.3f\n",end1,end2); /* end point: last scan of both runs */
     printf("]\nwriting best fit to .plf file...(done)\n"); 
 
     

@@ -12,3 +12,7 @@ Run the build container with. You need a folder for:
 ```
 docker run -d -p 80:80 -v /your/folder/with/data:/var/www/html/data -v /your/folder/for/temp:/var/www/html/temp ricolumc/msalign2:latest
 ```
+
+# Usage
+
+Go to: http://localhost/index.php

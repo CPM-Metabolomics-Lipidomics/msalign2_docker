@@ -4,18 +4,18 @@
 # 1: temp file to read which contains all the filenames for aligning
 # 2: Master file which you use to align everything
 # 3: mass error
-# 4: timewindow 
+# 4: timewindow [s]
 # 5: number of features
 # 6: costs per breakpoint
 # 7: fitness
-# 8: X option for msalign
-# 9: Y option for msalign
-# 10: start scanrange
-# 11: end scanrange
+# 8: X option for msalign [s], 0 = end of run
+# 9: Y option for msalign [s], 0 = end of run
+# 10: start retention time [s]
+# 11: end retention time [s], 0 = end of run
 
 LINES="$( cat $1 | awk '{ print $0 }' )"
 
-if [ ${4} -eq 0 ]; then
+if awk "BEGIN { exit !(${4} + 0 == 0) }"; then   # also works for decimal seconds
   TIMEWINDOW=""
 else
   TIMEWINDOW="-l${4}"

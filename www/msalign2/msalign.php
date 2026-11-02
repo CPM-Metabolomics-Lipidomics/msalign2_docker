@@ -36,13 +36,13 @@ else
   $ParamFile = fopen($ParamFileName, 'w');
   $ParamText = "Mass measurement error : " .$mass_error ."\n";
   fwrite($ParamFile, $ParamText);
-  $ParamText = "Standard deviation : " .$timewindow ."\n";
+  $ParamText = "Standard deviation [s] : " .$timewindow ."\n";
   fwrite($ParamFile, $ParamText);
   $ParamText = "Number of features : " .$features ."\n";
   fwrite($ParamFile, $ParamText);
-  $ParamText = "Scan range : " .$startscan ." - " .$endscan ."\n";
+  $ParamText = "Retention time range [s] : " .$startscan ." - " .$endscan ."\n";
   fwrite($ParamFile, $ParamText);
-  $ParamText = "Endpoint X, Y : " .$EndX .", " .$EndY ."\n";
+  $ParamText = "Endpoint X, Y [s] : " .$EndX .", " .$EndY ."\n";
   fwrite($ParamFile, $ParamText);
   $ParamText = "Costs per breakpoints : " .$CostsPB ."\n";
   fwrite($ParamFile, $ParamText);
