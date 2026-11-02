@@ -13,12 +13,17 @@
 # 10: start retention time [s]
 # 11: end retention time [s], 0 = end of run
 
-LINES="$( cat $1 | awk '{ print $0 }' )"
+LINES="$( cat "$1" | awk '{ print $0 }' )"
 
-if awk "BEGIN { exit !(${4} + 0 == 0) }"; then   # also works for decimal seconds
+# the commands below are run by a new bash, so quote everything that goes into them
+# (file names may contain spaces)
+QMASTER=$( printf '%q' "$2" )
+QPARAMS=$( printf '%q ' "-e$3" "-f$5" "-c$6" "-d$7" "-X$8" "-Y$9" "-R${10},${11}" )
+
+if awk -v t="$4" 'BEGIN { exit !(t + 0 == 0) }'; then   # also works for decimal seconds
   TIMEWINDOW=""
 else
-  TIMEWINDOW="-l${4}"
+  TIMEWINDOW=$( printf '%q' "-l${4}" )
 fi
 
 MAXJOBS=6
@@ -44,10 +49,12 @@ JOBLIST=""
 IFS="
 "
 for LINE in $LINES; do
-  OUTPUTFILE="${LINE%.*}_out.txt"
-  ALIGNFILE="$LINE.alignment"
-  PLFFILE="$LINE.alignment.plf"
-  COMMANDLIST+="./msalign2 -1$LINE -2$2 -e$3 $TIMEWINDOW -f$5 -c$6 -d$7 -X$8 -Y$9 -R${10},${11} > $OUTPUTFILE && ( echo 'Start creating aligned file' >> $OUTPUTFILE; R --no-restore --no-save --no-readline '--args $LINE $2' < ./wrap_mzXML.R; echo 'Done creating aligned file.' >> $OUTPUTFILE; ./FeaturesPlot.sh $ALIGNFILE $PLFFILE; echo 'Finished aligning!' >> $OUTPUTFILE )
+  QLINE=$( printf '%q' "$LINE" )
+  OUTPUTFILE=$( printf '%q' "${LINE%.*}_out.txt" )
+  ALIGNFILE=$( printf '%q' "$LINE.alignment" )
+  PLFFILE=$( printf '%q' "$LINE.alignment.plf" )
+  # R splits its arguments on spaces, so the file name goes to wrap_mzXML.R in an environment variable
+  COMMANDLIST+="./msalign2 -1$QLINE -2$QMASTER $QPARAMS $TIMEWINDOW > $OUTPUTFILE && ( echo 'Start creating aligned file' >> $OUTPUTFILE; MSALIGN_FILE=$QLINE R --no-restore --no-save --no-readline < ./wrap_mzXML.R; echo 'Done creating aligned file.' >> $OUTPUTFILE; ./FeaturesPlot.sh $ALIGNFILE $PLFFILE; echo 'Finished aligning!' >> $OUTPUTFILE )
   "
 done
 
@@ -57,7 +64,7 @@ for COMMAND in $COMMANDLIST; do
   while [ `clearToSpawn` -ne 1 ]; do
     sleep 1
   done
-  spawnjob $COMMAND &
+  spawnjob "$COMMAND" &
   LASTJOB=$!
   JOBLIST="$JOBLIST $LASTJOB"
 done

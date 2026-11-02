@@ -336,7 +336,7 @@ int main(int argc, char *argv[])
   PLF_type best_C;
   spectStrct mzXML_spectrum;
   RAMPFILE *mzXML_file;
-  char pepXML_filename[100], mzXML_filename_1[100], mzXML_filename_2[100], output_filename[100], scan_range[100], line[4000], *p, temp[30], new_mass;
+  char pepXML_filename[1024], mzXML_filename_1[1024], mzXML_filename_2[1024], output_filename[1024], scan_range[100], line[4000], *p, temp[30], new_mass;
   ramp_fileoffset_t offset, *scan_index;
   struct ScanHeaderStruct scan_header;
   struct RunHeaderStruct run_header;

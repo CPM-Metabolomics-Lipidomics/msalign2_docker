@@ -37,7 +37,8 @@ if ($Settings[Status] == "align")
 	  if (FindString($line, "Finished") !== FALSE)
 	  {
             $NumberFiles--;
-	    $StatusFiles .= "<a href=\"" .$value .".alignment.png\">Check alignment</a>&nbsp;&nbsp;&nbsp;<a href=\"" .$value .".alignment\">Check mass pairs</a>";
+	    $Link = implode("/", array_map("rawurlencode", explode("/", $value)));  // file names may contain spaces
+	    $StatusFiles .= "<a href=\"" .$Link .".alignment.png\">Check alignment</a>&nbsp;&nbsp;&nbsp;<a href=\"" .$Link .".alignment\">Check mass pairs</a>";
 	  }
 	  if (FindString($line, "aborted") !== FALSE)
 	  {

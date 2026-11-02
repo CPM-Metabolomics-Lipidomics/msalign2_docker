@@ -58,7 +58,9 @@ else
     fwrite($MyTempFile, $stringData);
   }
   fclose($MyTempFile);   // close the temporary file
-  $command = "./MSAlign.sh " .$NameTempFile ." " .$masterfile ." " .$mass_error ." " .$timewindow ." " .$features ." " .$CostsPB ." " .$fitness ." " .$EndX ." " .$EndY ." " .$startscan ." " .$endscan ." > " .$NameRunningFile ." &";
+  // quote every argument, file names may contain spaces
+  $args = array($NameTempFile, $masterfile, $mass_error, $timewindow, $features, $CostsPB, $fitness, $EndX, $EndY, $startscan, $endscan);
+  $command = "./MSAlign.sh " .implode(" ", array_map("escapeshellarg", $args)) ." > " .escapeshellarg($NameRunningFile) ." &";
   exec($command);
 }
 

@@ -9,8 +9,13 @@ all.args=commandArgs()
 ### The PLF file is in retention time (seconds): column 1 is the dataset to align,
 ### column 2 is the master dataset.
 ###
-plfFile = paste(all.args[6], ".alignment.plf", sep="")
-DataFile1 = all.args[6]
+### The file to align comes from MSALIGN_FILE (R splits command line arguments on spaces),
+### or else from the command line (--args <file>)
+DataFile1 = Sys.getenv("MSALIGN_FILE")
+if (DataFile1 == "") {
+	DataFile1 = all.args[6]
+}
+plfFile = paste(DataFile1, ".alignment.plf", sep="")
 ###
 ### Read the PLF table
 plf_tab <- read.table(plfFile, header = FALSE)
@@ -56,7 +61,7 @@ if (!isMzML) {
 	### Update the start and end time of the run
 	msRun <- getNodeSet(dataset1, "//*[local-name()='msRun']")[[1]]
 	invisible(addAttributes(msRun, "startTime"=paste("PT", min(new_retTime), "S", sep=""), "endTime"=paste("PT", max(new_retTime), "S", sep="")))
-	saveXML(root1, file = paste(all.args[6], "_ALIGNED.mzxml", sep=""), prefix = "<?xml version=\"1.0\"?>\n", encoding = "ISO-8859-1")
+	saveXML(root1, file = paste(DataFile1, "_ALIGNED.mzxml", sep=""), prefix = "<?xml version=\"1.0\"?>\n", encoding = "ISO-8859-1")
 } else {
 	###
 	### Parse the mzML file
