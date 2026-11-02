@@ -24,7 +24,7 @@ $scriptheader .= "}\n";
 $scriptheader .= "-->\n</script>\n";
 
 //-------------------------- get the server load ----------------------------------------------------
-  $GetLoad = "total_load.sh";
+  $GetLoad = "./total_load.sh";
   exec ($GetLoad, $ServerLoad);
   $iServerLoad = 1-(str_replace("%","",$ServerLoad[0])/100);     // 0 is read, 1 is green so correct by substracting the server load from 1
 //------------------------- end server load ---------------------------------------------------------

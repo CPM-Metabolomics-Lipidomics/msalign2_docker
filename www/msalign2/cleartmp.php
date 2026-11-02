@@ -14,7 +14,7 @@ if ((isset($_POST['Settings'])) || (isset($_GET['Settings'])))
   $allClear = $NumberFiles + 2;  // +2 is for temp file and running file
   foreach ($filenames as $value)
   { 
-    $nametmp = str_ireplace(".mzxml", "_out.txt", $value);
+    $nametmp = preg_replace('/\.mz(xml|ml)$/i', '_out.txt', $value);
     $do = unlink($nametmp);
     if ($do == 1)
     {
